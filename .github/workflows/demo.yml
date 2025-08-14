@@ -7,14 +7,14 @@ name: Node.js CI/CD Pipeline Demo
 on:
   # Trigger on push to main or develop branches
   push:
-    branches: [ main, develop ]
+    branches: [ master, develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
   
   # Trigger on pull requests to main
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
   
   # Manual trigger with inputs
   workflow_dispatch:
@@ -242,7 +242,7 @@ jobs:
           echo "Running unit tests..."
           # Simulate test execution
           sleep 2
-          echo "✅ All tests passed!"
+          echo " All tests passed!"
       
       - name: Generate test report
         run: |
@@ -287,13 +287,13 @@ jobs:
       - name: Run ESLint
         run: |
           echo "Running ESLint..."
-          echo "✅ No linting errors found"
+          echo " No linting errors found"
       
       - name: Security audit
         run: |
           echo "Running security audit..."
           npm audit --audit-level moderate || true
-          echo "✅ Security audit completed"
+          echo " Security audit completed"
 
   # Job 6: Package Application
   package:
@@ -313,7 +313,7 @@ jobs:
           path: ./artifacts
       
       - name: Package application
-        uses: ./.github/actions/publish-artifact
+        uses: ./actions/publish-artifact
         with:
           artifact-name: ${{ env.ARTIFACT_NAME }}
           version: ${{ needs.setup.outputs.version }}
@@ -391,7 +391,7 @@ jobs:
       
       - name: Notify deployment success
         run: |
-          echo "🚀 Successfully deployed version ${{ needs.setup.outputs.version }} to production!"
+          echo " Successfully deployed version ${{ needs.setup.outputs.version }} to production!"
           echo "URL: https://app.example.com"
           echo "Deployed by: ${{ github.actor }}"
 
@@ -406,9 +406,9 @@ jobs:
       - name: Clean up artifacts
         run: |
           echo "Cleaning up temporary resources..."
-          echo "✅ Cleanup completed"
+          echo " Cleanup completed"
       
       - name: Send notification
         if: failure()
         run: |
-          echo "⚠️ Some jobs failed. Check the workflow run for details."
+          echo " Some jobs failed. Check the workflow run for details."
