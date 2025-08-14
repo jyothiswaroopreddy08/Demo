@@ -1,0 +1,379 @@
+# GitHub Actions Matrix Strategy Examples
+# This file demonstrates various matrix strategy patterns and use cases
+
+name: Matrix Strategy Examples
+
+on:
+  workflow_dispatch:
+    inputs:
+      example_type:
+        description: 'Which matrix example to run'
+        required: true
+        default: 'basic'
+        type: choice
+        options:
+          - basic
+          - advanced
+          - conditional
+          - all
+
+env:
+  EXAMPLE_VAR: 'matrix-demo'
+
+jobs:
+  # Example 1: Basic Matrix Strategy
+  basic-matrix:
+    name: Basic Matrix - OS and Node versions
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event.inputs.example_type == 'basic' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      # Basic matrix with two dimensions
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [16, 18, 20]
+        # This creates 9 jobs total (3 OS × 3 Node versions)
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: Display matrix values
+        run: |
+          echo "Operating System: ${{ matrix.os }}"
+          echo "Node.js Version: ${{ matrix.node-version }}"
+          echo "Runner OS: ${{ runner.os }}"
+        shell: bash
+
+  # Example 2: Advanced Matrix with Include/Exclude
+  advanced-matrix:
+    name: Advanced Matrix with Include/Exclude
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event.inputs.example_type == 'advanced' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [16, 18, 20]
+        
+        # Exclude specific combinations
+        exclude:
+          # Don't test Node 16 on macOS (deprecated)
+          - os: macos-latest
+            node-version: 16
+          # Skip Windows with Node 20 (example: known issues)
+          - os: windows-latest
+            node-version: 20
+        
+        # Include additional specific configurations
+        include:
+          # Add LTS version test on Ubuntu
+          - os: ubuntu-latest
+            node-version: 18
+            node-type: 'lts'
+            experimental: false
+          
+          # Add experimental Node version
+          - os: ubuntu-latest
+            node-version: 21
+            node-type: 'experimental'
+            experimental: true
+          
+          # Add special Windows configuration
+          - os: windows-latest
+            node-version: 18
+            node-type: 'stable'
+            windows-features: 'enhanced'
+      
+      # Matrix strategy options
+      fail-fast: false        # Continue other jobs even if one fails
+      max-parallel: 6         # Limit concurrent jobs to 6
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: Display advanced matrix info
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          echo "Node Version: ${{ matrix.node-version }}"
+          echo "Node Type: ${{ matrix.node-type || 'standard' }}"
+          echo "Experimental: ${{ matrix.experimental || 'false' }}"
+          echo "Windows Features: ${{ matrix.windows-features || 'none' }}"
+          
+          # Show job index and total
+          echo "Matrix combination: ${{ strategy.job-index }} of ${{ strategy.job-total }}"
+        shell: bash
+      
+      - name: Conditional step for experimental
+        if: ${{ matrix.experimental == true }}
+        run: |
+          echo "⚠️ Running experimental Node.js version"
+          echo "This might have unstable features"
+        shell: bash
+
+  # Example 3: Multi-dimensional Matrix
+  multi-dimensional-matrix:
+    name: Multi-dimensional Matrix
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event.inputs.example_type == 'advanced' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      matrix:
+        # Four dimensions
+        os: [ubuntu-latest, windows-latest]
+        node-version: [18, 20]
+        package-manager: [npm, yarn, pnpm]
+        environment: [development, production]
+        
+        # Exclude combinations that don't make sense
+        exclude:
+          # pnpm not supported on Windows in this example
+          - os: windows-latest
+            package-manager: pnpm
+          
+          # Skip yarn in production on Windows
+          - os: windows-latest
+            package-manager: yarn
+            environment: production
+        
+        include:
+          # Add special configuration
+          - os: ubuntu-latest
+            node-version: 18
+            package-manager: npm
+            environment: testing
+            cache-strategy: 'aggressive'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: ${{ matrix.package-manager }}
+      
+      - name: Install package manager
+        run: |
+          case "${{ matrix.package-manager }}" in
+            "yarn")
+              npm install -g yarn
+              ;;
+            "pnpm")
+              npm install -g pnpm
+              ;;
+            *)
+              echo "Using npm (default)"
+              ;;
+          esac
+        shell: bash
+      
+      - name: Display matrix configuration
+        run: |
+          echo "=== Matrix Configuration ==="
+          echo "OS: ${{ matrix.os }}"
+          echo "Node: ${{ matrix.node-version }}"
+          echo "Package Manager: ${{ matrix.package-manager }}"
+          echo "Environment: ${{ matrix.environment }}"
+          echo "Cache Strategy: ${{ matrix.cache-strategy || 'default' }}"
+          echo "=========================="
+        shell: bash
+
+  # Example 4: Conditional Matrix based on inputs
+  conditional-matrix:
+    name: Conditional Matrix
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.example_type == 'conditional' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      matrix:
+        # Matrix varies based on conditions
+        test-type: 
+          - unit
+          - integration
+          - e2e
+        
+        # Include different configurations based on test type
+        include:
+          # Unit tests - fast, multiple Node versions
+          - test-type: unit
+            node-version: 18
+            timeout: 10
+            parallel: true
+          - test-type: unit
+            node-version: 20
+            timeout: 10
+            parallel: true
+          
+          # Integration tests - moderate, single version
+          - test-type: integration
+            node-version: 18
+            timeout: 30
+            parallel: false
+            database: postgres
+          
+          # E2E tests - slow, comprehensive
+          - test-type: e2e
+            node-version: 18
+            timeout: 60
+            parallel: false
+            browser: chrome
+          - test-type: e2e
+            node-version: 18
+            timeout: 60
+            parallel: false
+            browser: firefox
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: Setup test environment
+        run: |
+          echo "Setting up ${{ matrix.test-type }} tests"
+          echo "Node version: ${{ matrix.node-version }}"
+          echo "Timeout: ${{ matrix.timeout }} minutes"
+          echo "Parallel: ${{ matrix.parallel }}"
+          
+          # Conditional setup based on test type
+          case "${{ matrix.test-type }}" in
+            "integration")
+              echo "Database: ${{ matrix.database }}"
+              ;;
+            "e2e")
+              echo "Browser: ${{ matrix.browser }}"
+              ;;
+          esac
+        shell: bash
+      
+      - name: Run tests
+        run: |
+          echo "Running ${{ matrix.test-type }} tests..."
+          sleep ${{ matrix.timeout }}
+          echo "✅ ${{ matrix.test-type }} tests completed"
+        shell: bash
+
+  # Example 5: Dynamic Matrix from JSON
+  dynamic-matrix:
+    name: Dynamic Matrix Setup
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.example_type == 'advanced' || github.event.inputs.example_type == 'all' }}
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Generate dynamic matrix
+        id: set-matrix
+        run: |
+          # Create matrix based on conditions
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            # Full matrix for main branch
+            matrix='{"include":[
+              {"os":"ubuntu-latest","node":"18","env":"production"},
+              {"os":"ubuntu-latest","node":"20","env":"production"},
+              {"os":"windows-latest","node":"18","env":"production"},
+              {"os":"macos-latest","node":"18","env":"production"}
+            ]}'
+          else
+            # Minimal matrix for other branches
+            matrix='{"include":[
+              {"os":"ubuntu-latest","node":"18","env":"development"}
+            ]}'
+          fi
+          
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Generated matrix: $matrix"
+
+  # Job that uses the dynamic matrix
+  dynamic-matrix-consumer:
+    name: Use Dynamic Matrix
+    runs-on: ${{ matrix.os }}
+    needs: dynamic-matrix
+    if: ${{ github.event.inputs.example_type == 'advanced' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      matrix: ${{ fromJson(needs.dynamic-matrix.outputs.matrix) }}
+    
+    steps:
+      - name: Display dynamic matrix values
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          echo "Node: ${{ matrix.node }}"
+          echo "Environment: ${{ matrix.env }}"
+        shell: bash
+
+  # Example 6: Matrix with Outputs
+  matrix-with-outputs:
+    name: Matrix with Outputs
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.example_type == 'advanced' || github.event.inputs.example_type == 'all' }}
+    
+    strategy:
+      matrix:
+        service: [api, frontend, worker]
+        environment: [staging, production]
+    
+    outputs:
+      # Collect outputs from all matrix jobs
+      deployment-urls: ${{ steps.deploy.outputs.url }}
+    
+    steps:
+      - name: Deploy service
+        id: deploy
+        run: |
+          url="https://${{ matrix.service }}-${{ matrix.environment }}.example.com"
+          echo "url=$url" >> $GITHUB_OUTPUT
+          echo "Deployed ${{ matrix.service }} to ${{ matrix.environment }}: $url"
+      
+      - name: Test deployment
+        run: |
+          echo "Testing deployment at ${{ steps.deploy.outputs.url }}"
+          # Simulate health check
+          sleep 2
+          echo "✅ Deployment healthy"
+
+  # Summary job that waits for all matrix jobs
+  matrix-summary:
+    name: Matrix Summary
+    runs-on: ubuntu-latest
+    needs: [basic-matrix, advanced-matrix, multi-dimensional-matrix, conditional-matrix, matrix-with-outputs]
+    if: always() && (github.event.inputs.example_type == 'all')
+    
+    steps:
+      - name: Check matrix results
+        run: |
+          echo "=== Matrix Strategy Examples Summary ==="
+          echo "Basic Matrix: ${{ needs.basic-matrix.result }}"
+          echo "Advanced Matrix: ${{ needs.advanced-matrix.result }}"
+          echo "Multi-dimensional Matrix: ${{ needs.multi-dimensional-matrix.result }}"
+          echo "Conditional Matrix: ${{ needs.conditional-matrix.result }}"
+          echo "Matrix with Outputs: ${{ needs.matrix-with-outputs.result }}"
+          echo "================================="
+          
+          # Check if any failed
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "❌ Some matrix jobs failed"
+            exit 1
+          else
+            echo "✅ All matrix jobs completed successfully"
+          fi
