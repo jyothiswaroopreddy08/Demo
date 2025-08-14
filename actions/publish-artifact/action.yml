@@ -1,0 +1,48 @@
+name: 'Publish Artifact'
+description: 'Custom action to publish build artifacts to a registry'
+author: 'GitHub Actions Demo'
+
+# Action inputs
+inputs:
+  artifact-name:
+    description: 'Name of the artifact to publish'
+    required: true
+  version:
+    description: 'Version of the artifact'
+    required: true
+  registry-url:
+    description: 'URL of the registry to publish to'
+    required: true
+    default: 'https://npm.pkg.github.com'
+  access-token:
+    description: 'Access token for registry authentication'
+    required: false
+  dry-run:
+    description: 'Perform a dry run without actually publishing'
+    required: false
+    default: 'false'
+  include-metadata:
+    description: 'Include additional metadata in the publication'
+    required: false
+    default: 'true'
+
+# Action outputs
+outputs:
+  published-url:
+    description: 'URL of the published artifact'
+  published-version:
+    description: 'Version that was published'
+  publication-status:
+    description: 'Status of the publication (success/failed)'
+  metadata:
+    description: 'Additional metadata about the publication'
+
+# Use TypeScript action
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+# Branding for marketplace
+branding:
+  icon: 'package'
+  color: 'blue'
