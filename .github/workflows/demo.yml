@@ -1,0 +1,414 @@
+# GitHub Actions Demo Workflow
+# This workflow demonstrates all key GitHub Actions concepts for beginners
+
+name: Node.js CI/CD Pipeline Demo
+
+# Event Triggers - When this workflow runs
+on:
+  # Trigger on push to main or develop branches
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  
+  # Trigger on pull requests to main
+  pull_request:
+    branches: [ main ]
+  
+  # Manual trigger with inputs
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: false
+        type: boolean
+      custom_message:
+        description: 'Custom deployment message'
+        required: false
+        type: string
+  
+  # Schedule trigger (runs every day at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+
+# Environment Variables (Global)
+env:
+  NODE_VERSION: '18'
+  REGISTRY_URL: 'https://npm.pkg.github.com'
+  ARTIFACT_NAME: 'build-artifacts'
+
+# Jobs - Different units of work
+jobs:
+  # Job 1: Setup and Validation
+  setup:
+    name: Setup and Validate
+    runs-on: ubuntu-latest
+    
+    # Job-level environment variables
+    env:
+      SETUP_STAGE: 'initialization'
+    
+    # Job outputs - can be used by other jobs
+    outputs:
+      version: ${{ steps.package-version.outputs.version }}
+      should-deploy: ${{ steps.deployment-check.outputs.deploy }}
+      cache-key: ${{ steps.cache-info.outputs.key }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+      
+      - name: Display workflow inputs
+        run: |
+          echo "Environment: ${{ github.event.inputs.environment || 'auto' }}"
+          echo "Skip tests: ${{ github.event.inputs.skip_tests || 'false' }}"
+          echo "Custom message: ${{ github.event.inputs.custom_message || 'none' }}"
+          echo "Triggered by: ${{ github.event_name }}"
+      
+      - name: Extract package version
+        id: package-version
+        run: |
+          if [ -f "package.json" ]; then
+            version=$(node -p "require('./package.json').version")
+          else
+            version="1.0.0"
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "Extracted version: $version"
+      
+      - name: Check deployment conditions
+        id: deployment-check
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.event.inputs.environment }}" == "production" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate cache key
+        id: cache-info
+        run: |
+          key="node-${{ env.NODE_VERSION }}-${{ hashFiles('**/package-lock.json') }}"
+          echo "key=$key" >> $GITHUB_OUTPUT
+          echo "Cache key: $key"
+
+  # Job 2: Prepare Environment (Matrix Strategy Demo)
+  prepare:
+    name: Prepare Environment
+    runs-on: ${{ matrix.os }}
+    needs: setup
+    
+    # Matrix Strategy - Run job on multiple configurations
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [16, 18, 20]
+      fail-fast: false  # Don't cancel other jobs if one fails
+      max-parallel: 4   # Limit concurrent jobs
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      
+      - name: Create package.json if missing
+        run: |
+          if [ ! -f "package.json" ]; then
+            cat > package.json << 'EOF'
+          {
+            "name": "github-actions-demo",
+            "version": "${{ needs.setup.outputs.version }}",
+            "scripts": {
+              "build": "echo 'Building application...'",
+              "test": "echo 'Running tests...'",
+              "lint": "echo 'Running linter...'"
+            },
+            "devDependencies": {
+              "typescript": "^5.0.0"
+            }
+          }
+          EOF
+          fi
+        shell: bash
+      
+      - name: Install dependencies
+        run: |
+          npm ci || npm install
+      
+      - name: Display environment info
+        run: |
+          echo "OS: ${{ matrix.os }}"
+          echo "Node version: ${{ matrix.node-version }}"
+          echo "Experimental: ${{ matrix.experimental || 'false' }}"
+          echo "Working directory: $(pwd)"
+          node --version
+          npm --version
+
+  # Job 3: Build Application
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [setup, prepare]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: |
+          # Create package.json if it doesn't exist
+          if [ ! -f "package.json" ]; then
+            npm init -y
+          fi
+          npm ci || npm install
+      
+      - name: Build application
+        run: |
+          # Create build directory and files
+          mkdir -p dist
+          echo "console.log('Hello from GitHub Actions Demo!');" > dist/index.js
+          echo "Build completed successfully"
+          
+          # Create build info
+          cat > dist/build-info.json << EOF
+          {
+            "version": "${{ needs.setup.outputs.version }}",
+            "buildDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "triggeredBy": "${{ github.actor }}"
+          }
+          EOF
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/
+            package.json
+          retention-days: 30
+
+  # Job 4: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: setup
+    
+    # Skip tests if input parameter is set
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          if [ ! -f "package.json" ]; then
+            npm init -y
+          fi
+          npm ci || npm install
+      
+      - name: Run unit tests
+        run: |
+          echo "Running unit tests..."
+          # Simulate test execution
+          sleep 2
+          echo "✅ All tests passed!"
+      
+      - name: Generate test report
+        run: |
+          mkdir -p test-results
+          cat > test-results/results.xml << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuite name="Unit Tests" tests="5" failures="0" errors="0" time="2.345">
+            <testcase classname="App" name="should initialize correctly" time="0.001"/>
+            <testcase classname="Utils" name="should format dates" time="0.002"/>
+            <testcase classname="API" name="should handle requests" time="0.001"/>
+          </testsuite>
+          EOF
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+
+  # Job 5: Static Analysis
+  static-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    needs: setup
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          if [ ! -f "package.json" ]; then
+            npm init -y
+          fi
+          npm ci || npm install
+      
+      - name: Run ESLint
+        run: |
+          echo "Running ESLint..."
+          echo "✅ No linting errors found"
+      
+      - name: Security audit
+        run: |
+          echo "Running security audit..."
+          npm audit --audit-level moderate || true
+          echo "✅ Security audit completed"
+
+  # Job 6: Package Application
+  package:
+    name: Package Application
+    runs-on: ubuntu-latest
+    needs: [build, unit-tests, static-analysis]
+    
+    # Use custom action for packaging
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./artifacts
+      
+      - name: Package application
+        uses: ./.github/actions/publish-artifact
+        with:
+          artifact-name: ${{ env.ARTIFACT_NAME }}
+          version: ${{ needs.setup.outputs.version }}
+          registry-url: ${{ env.REGISTRY_URL }}
+
+  # Job 7: Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [setup, package]
+    if: ${{ needs.setup.outputs.should-deploy == 'true' && (github.event.inputs.environment == 'staging' || github.ref == 'refs/heads/develop') }}
+    
+    # Environment with protection rules and variables
+    environment:
+      name: staging
+      url: https://staging.example.com
+    
+    env:
+      DEPLOY_ENV: staging
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./package
+      
+      - name: Deploy to staging
+        uses: ./.github/actions/deploy
+        with:
+          environment: staging
+          version: ${{ needs.setup.outputs.version }}
+          api-key: ${{ secrets.STAGING_API_KEY }}
+          custom-message: ${{ github.event.inputs.custom_message || 'Automated deployment' }}
+        env:
+          DEPLOYMENT_TOKEN: ${{ secrets.STAGING_DEPLOYMENT_TOKEN }}
+
+  # Job 8: Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [setup, package, deploy-staging]
+    if: ${{ needs.setup.outputs.should-deploy == 'true' && (github.event.inputs.environment == 'production' || github.ref == 'refs/heads/main') }}
+    
+    # Production environment with manual approval
+    environment:
+      name: production
+      url: https://app.example.com
+    
+    env:
+      DEPLOY_ENV: production
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./package
+      
+      - name: Deploy to production
+        uses: ./.github/actions/deploy
+        with:
+          environment: production
+          version: ${{ needs.setup.outputs.version }}
+          api-key: ${{ secrets.PRODUCTION_API_KEY }}
+          custom-message: ${{ github.event.inputs.custom_message || 'Production deployment' }}
+        env:
+          DEPLOYMENT_TOKEN: ${{ secrets.PRODUCTION_DEPLOYMENT_TOKEN }}
+      
+      - name: Notify deployment success
+        run: |
+          echo "🚀 Successfully deployed version ${{ needs.setup.outputs.version }} to production!"
+          echo "URL: https://app.example.com"
+          echo "Deployed by: ${{ github.actor }}"
+
+  # Job 9: Cleanup
+  cleanup:
+    name: Cleanup Resources
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()  # Always run, even if previous jobs fail
+    
+    steps:
+      - name: Clean up artifacts
+        run: |
+          echo "Cleaning up temporary resources..."
+          echo "✅ Cleanup completed"
+      
+      - name: Send notification
+        if: failure()
+        run: |
+          echo "⚠️ Some jobs failed. Check the workflow run for details."
